@@ -107,7 +107,7 @@ def update_test_case_endpoint(
     test_case_id: int, test_case: TestCaseUpdate
 ) -> TestCaseResponse:
     """Update a test case by ID."""
-    update_data = test_case.model_dump(exclude_unset=True)
+    update_data = {k: v for k, v in test_case.model_dump(exclude_unset=True).items() if v is not None}
     result = update_test_case(test_case_id, update_data)
     if result is None:
         raise HTTPException(status_code=404, detail="Test case not found")

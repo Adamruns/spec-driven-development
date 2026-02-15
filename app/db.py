@@ -1,5 +1,6 @@
 """SQLite database operations for the Test Case Manager API."""
 
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -47,14 +48,14 @@ def _now() -> str:
 def _row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a dictionary, parsing tags back to a list."""
     d = dict(row)
-    d["tags"] = [t for t in d["tags"].split(",") if t] if d["tags"] else []
+    d["tags"] = json.loads(d["tags"]) if d["tags"] else []
     return d
 
 
 def create_test_case(data: dict) -> dict:
     """Insert a new test case and return the created record."""
     now = _now()
-    tags_str = ",".join(data.get("tags", []))
+    tags_str = json.dumps(data.get("tags", []))
     conn = get_connection()
     try:
         cursor = conn.execute(
@@ -99,9 +100,9 @@ def get_test_cases(
         query += " AND priority = ?"
         params.append(priority)
     if tag is not None:
-        # Match tag in comma-separated list
-        query += " AND (',' || tags || ',') LIKE ?"
-        params.append(f"%,{tag},%")
+        # Match tag in JSON array
+        query += " AND tags LIKE ?"
+        params.append(f'%"{tag}"%')
 
     query += " ORDER BY id"
 
@@ -140,7 +141,7 @@ def update_test_case(test_case_id: int, data: dict) -> Optional[dict]:
     priority = data.get("priority", existing["priority"])
     status = data.get("status", existing["status"])
     tags = data.get("tags", existing["tags"])
-    tags_str = ",".join(tags) if isinstance(tags, list) else tags
+    tags_str = json.dumps(tags) if isinstance(tags, list) else tags
 
     conn = get_connection()
     try:
