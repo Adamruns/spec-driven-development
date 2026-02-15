@@ -1,130 +1,88 @@
-"""FastAPI application for the Test Case Manager API."""
+"""FastAPI application for the Spec-to-Test Generator API."""
 
-from contextlib import asynccontextmanager
-from typing import Optional
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 
-from fastapi import FastAPI, HTTPException, Query
-
-from app.db import (
-    create_test_case,
-    delete_test_case,
-    get_test_case_by_id,
-    get_test_cases,
-    init_db,
-    update_test_case,
-)
-from app.models import (
-    Priority,
-    Status,
-    TestCaseCreate,
-    TestCaseResponse,
-    TestCaseUpdate,
-)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize the database on application startup."""
-    init_db()
-    yield
-
+from app.generator import generate_test_code
+from app.models import HealthResponse
 
 app = FastAPI(
-    title="Test Case Manager API",
+    title="Spec-to-Test Generator API",
     description=(
-        "A RESTful API for managing test cases. "
-        "Supports full CRUD operations with filtering by status, priority, and tag. "
-        "Built with FastAPI, SQLite, and Pydantic."
+        "A REST API that accepts an OpenAPI 3.x specification and "
+        "generates a runnable pytest test suite covering happy paths, "
+        "error cases, and schema validation."
     ),
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan,
 )
 
 
 @app.post(
-    "/test-cases",
-    response_model=TestCaseResponse,
-    status_code=201,
-    tags=["Test Cases"],
-    summary="Create a new test case",
-    description="Create a new test case with the provided details. All required fields must be supplied.",
+    "/generate",
+    response_class=PlainTextResponse,
+    tags=["Generator"],
+    summary="Generate pytest tests from an OpenAPI spec",
+    description=(
+        "Accepts an OpenAPI 3.x JSON spec in the request body and returns "
+        "generated pytest code as plain text."
+    ),
+    responses={
+        200: {"description": "Generated pytest code", "content": {"text/plain": {}}},
+        400: {"description": "Invalid OpenAPI spec"},
+        422: {"description": "Request body missing or not valid JSON"},
+    },
 )
-def create_test_case_endpoint(test_case: TestCaseCreate) -> TestCaseResponse:
-    """Create a new test case and return the created resource."""
-    result = create_test_case(test_case.model_dump())
-    return TestCaseResponse(**result)
+async def generate_tests(request: Request) -> PlainTextResponse:
+    """Accept an OpenAPI spec and return generated pytest test code."""
+    # Parse JSON body - FastAPI will return 422 automatically if body is missing
+    # or not valid JSON, but we handle it explicitly for clarity.
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Request body must be valid JSON."},
+        )
+
+    # Validate that it looks like an OpenAPI spec
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Request body must be a JSON object."},
+        )
+
+    missing_keys = []
+    for key in ("openapi", "info", "paths"):
+        if key not in body:
+            missing_keys.append(key)
+
+    if missing_keys:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": (
+                    f"Invalid OpenAPI spec: missing required key(s): "
+                    f"{', '.join(missing_keys)}. "
+                    f"A valid OpenAPI spec must include 'openapi', 'info', and 'paths'."
+                )
+            },
+        )
+
+    # Generate the test code
+    code = generate_test_code(body)
+
+    return PlainTextResponse(content=code, status_code=200)
 
 
 @app.get(
-    "/test-cases",
-    response_model=list[TestCaseResponse],
-    status_code=200,
-    tags=["Test Cases"],
-    summary="List all test cases",
-    description="Retrieve all test cases, with optional filtering by status, priority, and/or tag.",
+    "/health",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health check",
+    description="Returns the health status of the API.",
 )
-def list_test_cases_endpoint(
-    status: Optional[Status] = Query(None, description="Filter by status"),
-    priority: Optional[Priority] = Query(None, description="Filter by priority"),
-    tag: Optional[str] = Query(None, description="Filter by tag"),
-) -> list[TestCaseResponse]:
-    """List all test cases with optional filters."""
-    status_val = status.value if status else None
-    priority_val = priority.value if priority else None
-    results = get_test_cases(status=status_val, priority=priority_val, tag=tag)
-    return [TestCaseResponse(**r) for r in results]
-
-
-@app.get(
-    "/test-cases/{test_case_id}",
-    response_model=TestCaseResponse,
-    status_code=200,
-    tags=["Test Cases"],
-    summary="Get a test case by ID",
-    description="Retrieve a single test case by its unique identifier.",
-    responses={404: {"description": "Test case not found"}},
-)
-def get_test_case_endpoint(test_case_id: int) -> TestCaseResponse:
-    """Get a single test case by ID."""
-    result = get_test_case_by_id(test_case_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Test case not found")
-    return TestCaseResponse(**result)
-
-
-@app.put(
-    "/test-cases/{test_case_id}",
-    response_model=TestCaseResponse,
-    status_code=200,
-    tags=["Test Cases"],
-    summary="Update a test case",
-    description="Update an existing test case. Only the fields provided will be updated.",
-    responses={404: {"description": "Test case not found"}},
-)
-def update_test_case_endpoint(
-    test_case_id: int, test_case: TestCaseUpdate
-) -> TestCaseResponse:
-    """Update a test case by ID."""
-    update_data = {k: v for k, v in test_case.model_dump(exclude_unset=True).items() if v is not None}
-    result = update_test_case(test_case_id, update_data)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Test case not found")
-    return TestCaseResponse(**result)
-
-
-@app.delete(
-    "/test-cases/{test_case_id}",
-    status_code=200,
-    tags=["Test Cases"],
-    summary="Delete a test case",
-    description="Delete a test case by its unique identifier.",
-    responses={404: {"description": "Test case not found"}},
-)
-def delete_test_case_endpoint(test_case_id: int) -> dict:
-    """Delete a test case by ID."""
-    deleted = delete_test_case(test_case_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Test case not found")
-    return {"detail": "Test case deleted", "id": test_case_id}
+async def health_check() -> HealthResponse:
+    """Return a simple health check response."""
+    return HealthResponse(status="ok")

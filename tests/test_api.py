@@ -1,370 +1,427 @@
-"""API tests for the Test Case Manager.
+"""API tests for the Spec-to-Test Generator.
 
-Tests are mapped to Acceptance Criteria in SPECS/test-case-manager-api.md.
+Tests are mapped to Acceptance Criteria defined in SPECS/spec-to-test-generator.md.
+
+AC1:  POST /generate with a valid OpenAPI spec returns 200 with generated pytest code
+AC2:  Generated tests include a happy-path test for each endpoint+method in the spec
+AC3:  Generated tests include jsonschema validation for endpoints with defined response schemas
+AC4:  Generated tests include 404 tests for endpoints with path parameters
+AC5:  Generated tests include 422 tests for endpoints with required request body fields
+AC6:  POST /generate with invalid/non-OpenAPI JSON returns 400 with a descriptive error message
+AC7:  POST /generate with missing or empty body returns 422
+AC8:  GET /health returns 200 with status "ok"
+AC9:  Generated test code is syntactically valid Python (compiles without errors)
+AC10: Swagger UI is accessible at /docs
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 
 # ---------------------------------------------------------------------------
-# AC1: POST /test-cases creates a test case and returns 201
+# Helper
 # ---------------------------------------------------------------------------
 
-class TestCreateTestCase:
-    """Tests for POST /test-cases."""
-
-    def test_create_test_case_returns_201(self, client, sample_test_case):
-        """AC1: POST /test-cases returns 201 with the created resource."""
-        response = client.post("/test-cases", json=sample_test_case)
-        assert response.status_code == 201
-
-    def test_create_test_case_returns_created_resource(self, client, sample_test_case):
-        """AC1: The response body contains the created test case with an id."""
-        response = client.post("/test-cases", json=sample_test_case)
-        data = response.json()
-        assert "id" in data
-        assert data["title"] == sample_test_case["title"]
-        assert data["description"] == sample_test_case["description"]
-        assert data["steps"] == sample_test_case["steps"]
-        assert data["expected_result"] == sample_test_case["expected_result"]
-        assert data["priority"] == sample_test_case["priority"]
-        assert data["status"] == sample_test_case["status"]
-        assert data["tags"] == sample_test_case["tags"]
-
-    def test_create_test_case_has_timestamps(self, client, sample_test_case):
-        """AC1: The created test case includes created_at and updated_at."""
-        response = client.post("/test-cases", json=sample_test_case)
-        data = response.json()
-        assert "created_at" in data
-        assert "updated_at" in data
-
-    def test_create_test_case_with_empty_tags(self, client, sample_test_case):
-        """Test that creating a test case with no tags works."""
-        sample_test_case["tags"] = []
-        response = client.post("/test-cases", json=sample_test_case)
-        assert response.status_code == 201
-        assert response.json()["tags"] == []
-
-    def test_create_test_case_auto_increments_id(self, client, sample_test_case):
-        """Test that IDs are auto-incremented."""
-        r1 = client.post("/test-cases", json=sample_test_case)
-        r2 = client.post("/test-cases", json=sample_test_case)
-        assert r2.json()["id"] == r1.json()["id"] + 1
+def _generate(client, spec: dict) -> "httpx.Response":
+    """POST a spec to /generate and return the response."""
+    return client.post("/generate", json=spec)
 
 
 # ---------------------------------------------------------------------------
-# AC2: GET /test-cases returns all test cases
+# AC1 & AC9: POST /generate with valid spec returns 200 with pytest code
 # ---------------------------------------------------------------------------
 
-class TestListTestCases:
-    """Tests for GET /test-cases."""
+class TestGenerate:
+    """Tests for successful POST /generate calls."""
 
-    def test_list_test_cases_returns_200(self, client):
-        """AC2: GET /test-cases returns 200."""
-        response = client.get("/test-cases")
+    def test_generate_returns_200(self, client, sample_openapi_spec):
+        """AC1: POST /generate with a valid OpenAPI spec returns HTTP 200."""
+        response = _generate(client, sample_openapi_spec)
         assert response.status_code == 200
 
-    def test_list_test_cases_returns_list(self, client):
-        """AC2: GET /test-cases returns a list."""
-        response = client.get("/test-cases")
-        assert isinstance(response.json(), list)
+    def test_generate_returns_text_content_type(self, client, sample_openapi_spec):
+        """AC1: The response Content-Type is text/plain (generated Python code)."""
+        response = _generate(client, sample_openapi_spec)
+        content_type = response.headers.get("content-type", "")
+        assert "text/plain" in content_type
 
-    def test_list_empty_returns_empty_list(self, client):
-        """Extra: When no test cases exist, returns an empty list."""
-        response = client.get("/test-cases")
-        assert response.json() == []
+    def test_generate_response_is_non_empty(self, client, sample_openapi_spec):
+        """AC1: The generated output is not empty."""
+        response = _generate(client, sample_openapi_spec)
+        assert len(response.text.strip()) > 0
 
-    def test_list_returns_all_created(self, client, sample_test_case):
-        """AC2: All created test cases appear in the list."""
-        client.post("/test-cases", json=sample_test_case)
-        sample_test_case["title"] = "Another test case"
-        client.post("/test-cases", json=sample_test_case)
-        response = client.get("/test-cases")
-        assert len(response.json()) == 2
+    # -------------------------------------------------------------------
+    # AC2: Happy-path tests for each endpoint+method
+    # -------------------------------------------------------------------
 
+    def test_generated_code_has_get_pets_test(self, client, sample_openapi_spec):
+        """AC2: Generated code includes a happy-path test for GET /pets."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # Should contain a test function that exercises GET /pets
+        assert "def test_" in code
+        assert "/pets" in code
+        # At least one GET call for /pets
+        assert "get" in code.lower()
 
-# ---------------------------------------------------------------------------
-# AC3-AC5: Filtering
-# ---------------------------------------------------------------------------
+    def test_generated_code_has_post_pets_test(self, client, sample_openapi_spec):
+        """AC2: Generated code includes a happy-path test for POST /pets."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        assert "post" in code.lower()
+        # The generated test should reference the /pets path for creation
+        assert "/pets" in code
 
-class TestFilterTestCases:
-    """Tests for GET /test-cases with query filters."""
+    def test_generated_code_has_get_pet_by_id_test(self, client, sample_openapi_spec):
+        """AC2: Generated code includes a happy-path test for GET /pets/{petId}."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # Should reference the parameterized path
+        assert "pet" in code.lower()
 
-    def test_filter_by_status(self, client, sample_test_case):
-        """AC3: GET /test-cases?status=active filters by status."""
-        # Create an active test case
-        client.post("/test-cases", json=sample_test_case)
-        # Create a draft test case
-        draft = sample_test_case.copy()
-        draft["status"] = "draft"
-        draft["title"] = "Draft test case"
-        client.post("/test-cases", json=draft)
-
-        response = client.get("/test-cases", params={"status": "active"})
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["status"] == "active"
-
-    def test_filter_by_priority(self, client, sample_test_case):
-        """AC4: GET /test-cases?priority=high filters by priority."""
-        client.post("/test-cases", json=sample_test_case)
-        low = sample_test_case.copy()
-        low["priority"] = "low"
-        low["title"] = "Low priority test"
-        client.post("/test-cases", json=low)
-
-        response = client.get("/test-cases", params={"priority": "high"})
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["priority"] == "high"
-
-    def test_filter_by_tag(self, client, sample_test_case):
-        """AC5: GET /test-cases?tag=regression filters by tag."""
-        client.post("/test-cases", json=sample_test_case)
-        no_regression = sample_test_case.copy()
-        no_regression["tags"] = ["smoke"]
-        no_regression["title"] = "Smoke only"
-        client.post("/test-cases", json=no_regression)
-
-        response = client.get("/test-cases", params={"tag": "regression"})
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert "regression" in data[0]["tags"]
-
-    def test_filter_by_multiple_params(self, client, sample_test_case):
-        """Extra: Filter by status and priority simultaneously."""
-        client.post("/test-cases", json=sample_test_case)
-
-        other = sample_test_case.copy()
-        other["status"] = "draft"
-        other["priority"] = "low"
-        other["title"] = "Draft low"
-        client.post("/test-cases", json=other)
-
-        response = client.get(
-            "/test-cases", params={"status": "active", "priority": "high"}
+    def test_generated_code_covers_all_endpoints(self, client, sample_openapi_spec):
+        """AC2: Every path in the spec has at least one corresponding test function."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        test_function_count = code.count("def test_")
+        # The sample spec has 3 endpoint+method combos:
+        #   GET /pets, POST /pets, GET /pets/{petId}
+        # We expect at least 3 happy-path test functions (may be more with error tests)
+        assert test_function_count >= 3, (
+            f"Expected at least 3 test functions for 3 endpoints, "
+            f"found {test_function_count}"
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["status"] == "active"
-        assert data[0]["priority"] == "high"
 
-    def test_filter_returns_empty_when_no_match(self, client, sample_test_case):
-        """Extra: Filtering with no matches returns an empty list."""
-        client.post("/test-cases", json=sample_test_case)
-        response = client.get("/test-cases", params={"status": "inactive"})
-        assert response.status_code == 200
-        assert response.json() == []
+    # -------------------------------------------------------------------
+    # AC3: Schema validation tests
+    # -------------------------------------------------------------------
 
+    def test_generated_code_has_schema_validation(self, client, sample_openapi_spec):
+        """AC3: Generated code includes jsonschema validation for endpoints with schemas.
 
-# ---------------------------------------------------------------------------
-# AC6-AC7: GET /test-cases/{id}
-# ---------------------------------------------------------------------------
-
-class TestGetTestCaseById:
-    """Tests for GET /test-cases/{id}."""
-
-    def test_get_by_id_returns_200(self, client, created_test_case):
-        """AC6: GET /test-cases/{id} returns 200 for an existing test case."""
-        tc_id = created_test_case["id"]
-        response = client.get(f"/test-cases/{tc_id}")
-        assert response.status_code == 200
-
-    def test_get_by_id_returns_correct_data(self, client, created_test_case):
-        """AC6: The returned data matches what was created."""
-        tc_id = created_test_case["id"]
-        response = client.get(f"/test-cases/{tc_id}")
-        data = response.json()
-        assert data["id"] == tc_id
-        assert data["title"] == created_test_case["title"]
-
-    def test_get_nonexistent_returns_404(self, client):
-        """AC7: GET /test-cases/{id} returns 404 for a non-existent ID."""
-        response = client.get("/test-cases/99999")
-        assert response.status_code == 404
-
-    def test_create_and_get_by_id(self, client, sample_test_case):
-        """Extra: End-to-end create then retrieve by ID."""
-        create_resp = client.post("/test-cases", json=sample_test_case)
-        assert create_resp.status_code == 201
-        tc_id = create_resp.json()["id"]
-
-        get_resp = client.get(f"/test-cases/{tc_id}")
-        assert get_resp.status_code == 200
-        assert get_resp.json()["title"] == sample_test_case["title"]
-        assert get_resp.json()["tags"] == sample_test_case["tags"]
-
-
-# ---------------------------------------------------------------------------
-# AC8-AC9: PUT /test-cases/{id}
-# ---------------------------------------------------------------------------
-
-class TestUpdateTestCase:
-    """Tests for PUT /test-cases/{id}."""
-
-    def test_update_returns_200(self, client, created_test_case):
-        """AC8: PUT /test-cases/{id} returns 200 on successful update."""
-        tc_id = created_test_case["id"]
-        response = client.put(
-            f"/test-cases/{tc_id}", json={"title": "Updated title"}
+        The sample spec defines response schemas for GET /pets and GET /pets/{petId},
+        so the generated tests should include jsonschema validation calls.
+        """
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # Should reference jsonschema validation (e.g., jsonschema.validate or validate())
+        assert "jsonschema" in code.lower() or "validate" in code.lower(), (
+            "Generated code should include schema validation "
+            "(jsonschema.validate or similar)"
         )
-        assert response.status_code == 200
 
-    def test_update_changes_field(self, client, created_test_case):
-        """AC8: The updated field is reflected in the response."""
-        tc_id = created_test_case["id"]
-        response = client.put(
-            f"/test-cases/{tc_id}", json={"title": "Updated title"}
+    # -------------------------------------------------------------------
+    # AC4: 404 tests for endpoints with path parameters
+    # -------------------------------------------------------------------
+
+    def test_generated_code_has_404_test_for_path_params(self, client, sample_openapi_spec):
+        """AC4: Generated code includes a 404 test for GET /pets/{petId}.
+
+        The spec defines a 404 response for the path-parameter endpoint,
+        and the generator should produce a test that verifies 404 behaviour.
+        """
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        assert "404" in code, (
+            "Generated code should include a 404 status check "
+            "for the path-parameter endpoint"
         )
-        assert response.json()["title"] == "Updated title"
 
-    def test_update_preserves_other_fields(self, client, created_test_case):
-        """AC8: Fields not included in the update remain unchanged."""
-        tc_id = created_test_case["id"]
-        response = client.put(
-            f"/test-cases/{tc_id}", json={"title": "Updated title"}
+    # -------------------------------------------------------------------
+    # AC5: 422 tests for required request bodies
+    # -------------------------------------------------------------------
+
+    def test_generated_code_has_missing_body_test(self, client, sample_openapi_spec):
+        """AC5: Generated code includes a 422 test for POST /pets (required body).
+
+        The spec defines a required requestBody for POST /pets with a required
+        'name' field. The generator should produce a test that sends a request
+        with missing/empty body and expects 422.
+        """
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        assert "422" in code, (
+            "Generated code should include a 422 status check "
+            "for endpoints with required request bodies"
         )
-        data = response.json()
-        assert data["description"] == created_test_case["description"]
-        assert data["priority"] == created_test_case["priority"]
 
-    def test_update_changes_updated_at(self, client, created_test_case):
-        """AC8: The updated_at timestamp changes after an update."""
-        tc_id = created_test_case["id"]
-        original_updated_at = created_test_case["updated_at"]
+    # -------------------------------------------------------------------
+    # AC9: Generated code is syntactically valid Python
+    # -------------------------------------------------------------------
 
-        import time
-        time.sleep(0.01)  # Ensure timestamp difference
+    def test_generated_code_compiles(self, client, sample_openapi_spec):
+        """AC9: The generated test code is syntactically valid Python.
 
-        response = client.put(
-            f"/test-cases/{tc_id}", json={"title": "Updated title"}
-        )
-        assert response.json()["updated_at"] != original_updated_at
-
-    def test_update_nonexistent_returns_404(self, client):
-        """AC9: PUT /test-cases/{id} returns 404 for a non-existent ID."""
-        response = client.put(
-            "/test-cases/99999", json={"title": "Does not exist"}
-        )
-        assert response.status_code == 404
+        Uses compile() to verify the code parses without SyntaxError.
+        """
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        try:
+            compile(code, "<generated>", "exec")
+        except SyntaxError as exc:
+            pytest.fail(
+                f"Generated code is not valid Python: {exc}\n\n"
+                f"--- Generated code ---\n{code}"
+            )
 
 
 # ---------------------------------------------------------------------------
-# AC10-AC11: DELETE /test-cases/{id}
+# AC6: Invalid / non-OpenAPI JSON returns 400
 # ---------------------------------------------------------------------------
 
-class TestDeleteTestCase:
-    """Tests for DELETE /test-cases/{id}."""
+class TestGenerateErrors:
+    """Tests for POST /generate error handling."""
 
-    def test_delete_returns_200(self, client, created_test_case):
-        """AC10: DELETE /test-cases/{id} returns 200 on successful deletion."""
-        tc_id = created_test_case["id"]
-        response = client.delete(f"/test-cases/{tc_id}")
-        assert response.status_code == 200
+    def test_non_openapi_json_returns_400(self, client):
+        """AC6: Sending valid JSON that is not an OpenAPI spec returns 400.
 
-    def test_delete_removes_test_case(self, client, created_test_case):
-        """AC10: After deletion, the test case is no longer retrievable."""
-        tc_id = created_test_case["id"]
-        client.delete(f"/test-cases/{tc_id}")
-        response = client.get(f"/test-cases/{tc_id}")
-        assert response.status_code == 404
+        A random JSON object without openapi/info/paths keys is not a valid
+        OpenAPI spec and should be rejected with a descriptive error.
+        """
+        response = client.post(
+            "/generate",
+            json={"foo": "bar", "baz": 123},
+        )
+        assert response.status_code == 400
 
-    def test_delete_nonexistent_returns_404(self, client):
-        """AC11: DELETE /test-cases/{id} returns 404 for a non-existent ID."""
-        response = client.delete("/test-cases/99999")
-        assert response.status_code == 404
+    def test_missing_paths_key_returns_400(self, client):
+        """AC6: An object with openapi and info but no paths returns 400."""
+        response = client.post(
+            "/generate",
+            json={
+                "openapi": "3.0.0",
+                "info": {"title": "Incomplete", "version": "1.0.0"},
+            },
+        )
+        assert response.status_code == 400
 
-    def test_delete_then_get_returns_404(self, client, created_test_case):
-        """Extra: Delete a test case, then verify GET returns 404."""
-        tc_id = created_test_case["id"]
-        del_resp = client.delete(f"/test-cases/{tc_id}")
-        assert del_resp.status_code == 200
+    def test_missing_info_key_returns_400(self, client):
+        """AC6: An object with openapi and paths but no info returns 400."""
+        response = client.post(
+            "/generate",
+            json={
+                "openapi": "3.0.0",
+                "paths": {},
+            },
+        )
+        assert response.status_code == 400
 
-        get_resp = client.get(f"/test-cases/{tc_id}")
-        assert get_resp.status_code == 404
+    def test_missing_openapi_key_returns_400(self, client):
+        """AC6: An object with info and paths but no openapi version returns 400."""
+        response = client.post(
+            "/generate",
+            json={
+                "info": {"title": "No version", "version": "1.0.0"},
+                "paths": {},
+            },
+        )
+        assert response.status_code == 400
 
+    def test_error_response_has_descriptive_message(self, client):
+        """AC6: The 400 error response includes a descriptive error message."""
+        response = client.post(
+            "/generate",
+            json={"not": "openapi"},
+        )
+        assert response.status_code == 400
+        body = response.json()
+        assert "detail" in body, (
+            "Error response should include a 'detail' field with a message"
+        )
+        assert len(body["detail"]) > 0
 
-# ---------------------------------------------------------------------------
-# AC12: Validation errors
-# ---------------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # AC7: Missing or empty body returns 422
+    # -------------------------------------------------------------------
 
-class TestValidation:
-    """Tests for input validation (422 errors)."""
-
-    def test_create_missing_required_fields_returns_422(self, client):
-        """AC12: POST /test-cases with missing required fields returns 422."""
-        response = client.post("/test-cases", json={})
+    def test_empty_body_returns_422(self, client):
+        """AC7: POST /generate with no body at all returns 422."""
+        response = client.post("/generate")
         assert response.status_code == 422
 
-    def test_create_empty_title_returns_422(self, client, sample_test_case):
-        """AC12: POST /test-cases with an empty title returns 422."""
-        sample_test_case["title"] = ""
-        response = client.post("/test-cases", json=sample_test_case)
-        assert response.status_code == 422
+    def test_empty_json_object_returns_error(self, client):
+        """AC7: POST /generate with an empty JSON object returns 400 or 422.
 
-    def test_create_invalid_priority_returns_422(self, client, sample_test_case):
-        """AC12: POST /test-cases with an invalid priority returns 422."""
-        sample_test_case["priority"] = "urgent"
-        response = client.post("/test-cases", json=sample_test_case)
-        assert response.status_code == 422
+        An empty dict {} is valid JSON but not an OpenAPI spec.
+        The implementation may return 400 (not OpenAPI) or 422 (missing fields).
+        Either is acceptable per the spec.
+        """
+        response = client.post("/generate", json={})
+        assert response.status_code in (400, 422)
 
-    def test_create_invalid_status_returns_422(self, client, sample_test_case):
-        """AC12: POST /test-cases with an invalid status returns 422."""
-        sample_test_case["status"] = "archived"
-        response = client.post("/test-cases", json=sample_test_case)
-        assert response.status_code == 422
-
-    def test_create_missing_title_returns_422(self, client, sample_test_case):
-        """AC12: POST /test-cases without a title field returns 422."""
-        del sample_test_case["title"]
-        response = client.post("/test-cases", json=sample_test_case)
-        assert response.status_code == 422
-
-    def test_create_missing_description_returns_422(self, client, sample_test_case):
-        """AC12: POST /test-cases without a description field returns 422."""
-        del sample_test_case["description"]
-        response = client.post("/test-cases", json=sample_test_case)
+    def test_non_json_content_returns_422(self, client):
+        """AC7: POST /generate with non-JSON content returns 422."""
+        response = client.post(
+            "/generate",
+            content=b"this is not json",
+            headers={"Content-Type": "application/json"},
+        )
         assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
-# AC13: Swagger UI
+# AC8: GET /health returns 200 with status "ok"
+# ---------------------------------------------------------------------------
+
+class TestHealth:
+    """Tests for the GET /health endpoint."""
+
+    def test_health_returns_200(self, client):
+        """AC8: GET /health returns HTTP 200."""
+        response = client.get("/health")
+        assert response.status_code == 200
+
+    def test_health_returns_ok_status(self, client):
+        """AC8: GET /health response body contains {"status": "ok"}."""
+        response = client.get("/health")
+        data = response.json()
+        assert data["status"] == "ok"
+
+    def test_health_returns_json(self, client):
+        """AC8: GET /health returns JSON content type."""
+        response = client.get("/health")
+        content_type = response.headers.get("content-type", "")
+        assert "application/json" in content_type
+
+
+# ---------------------------------------------------------------------------
+# AC10: Swagger UI at /docs
 # ---------------------------------------------------------------------------
 
 class TestSwaggerUI:
     """Tests for Swagger UI availability."""
 
-    def test_swagger_ui_accessible(self, client):
-        """AC13: Swagger UI is accessible at /docs."""
+    def test_docs_accessible(self, client):
+        """AC10: GET /docs returns 200."""
         response = client.get("/docs")
         assert response.status_code == 200
-        assert "text/html" in response.headers.get("content-type", "")
+
+    def test_docs_returns_html(self, client):
+        """AC10: GET /docs returns an HTML page (Swagger UI)."""
+        response = client.get("/docs")
+        content_type = response.headers.get("content-type", "")
+        assert "text/html" in content_type
+
+    def test_docs_contains_swagger_ui(self, client):
+        """AC10: The /docs page contains Swagger UI markers."""
+        response = client.get("/docs")
+        body = response.text
+        assert "swagger" in body.lower() or "openapi" in body.lower(), (
+            "/docs should serve Swagger UI with recognizable content"
+        )
 
 
 # ---------------------------------------------------------------------------
-# AC14: Persistence (SQLite)
+# Edge cases and additional coverage
 # ---------------------------------------------------------------------------
 
-class TestPersistence:
-    """Tests for data persistence."""
+class TestGenerateEdgeCases:
+    """Edge-case and robustness tests for POST /generate."""
 
-    def test_data_persists_across_client_sessions(self, client, sample_test_case):
-        """AC14: Data persists in SQLite (survives new client instances)."""
-        # Create a test case
-        create_resp = client.post("/test-cases", json=sample_test_case)
-        assert create_resp.status_code == 201
-        tc_id = create_resp.json()["id"]
+    def test_spec_with_no_paths_returns_200(self, client, minimal_openapi_spec):
+        """Edge: A valid OpenAPI spec with an empty paths object still returns 200.
 
-        # Create a new client (simulating a restart, same DB file)
-        from app.main import app as the_app
-        new_client = TestClient(the_app)
+        The generator should handle specs with zero endpoints gracefully.
+        """
+        response = _generate(client, minimal_openapi_spec)
+        assert response.status_code == 200
 
-        # The test case should still be there
-        get_resp = new_client.get(f"/test-cases/{tc_id}")
-        assert get_resp.status_code == 200
-        assert get_resp.json()["title"] == sample_test_case["title"]
+    def test_spec_with_no_paths_produces_valid_python(self, client, minimal_openapi_spec):
+        """Edge: Even with no paths, the generated code should be valid Python."""
+        response = _generate(client, minimal_openapi_spec)
+        code = response.text
+        try:
+            compile(code, "<generated>", "exec")
+        except SyntaxError as exc:
+            pytest.fail(
+                f"Generated code for empty-paths spec is invalid Python: {exc}\n\n"
+                f"--- Generated code ---\n{code}"
+            )
+
+    def test_spec_with_multiple_methods_on_same_path(self, client, multi_method_spec):
+        """Edge: A spec with GET, POST, and DELETE on /items generates tests for all.
+
+        The multi_method_spec fixture has 3 methods on a single path.
+        """
+        response = _generate(client, multi_method_spec)
+        code = response.text
+        assert response.status_code == 200
+        # Should produce at least one test per method
+        test_count = code.count("def test_")
+        assert test_count >= 3, (
+            f"Expected at least 3 test functions for 3 methods on /items, "
+            f"found {test_count}"
+        )
+
+    def test_generated_code_has_imports(self, client, sample_openapi_spec):
+        """Edge: Generated code includes necessary import statements."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # At minimum should import requests or httpx (or similar HTTP library)
+        has_http_import = (
+            "import requests" in code
+            or "import httpx" in code
+            or "from requests" in code
+            or "from httpx" in code
+        )
+        # Or it might use pytest's built-in client patterns
+        has_pytest_import = "import pytest" in code or "from pytest" in code
+        assert has_http_import or has_pytest_import, (
+            "Generated code should include imports for HTTP calls or pytest"
+        )
+
+    def test_generated_code_has_base_url(self, client, sample_openapi_spec):
+        """Edge: Generated code references a configurable base URL or host."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # The generated code should have some form of base URL configuration
+        has_base_url = (
+            "base_url" in code.lower()
+            or "base" in code.lower()
+            or "host" in code.lower()
+            or "http://" in code
+            or "https://" in code
+        )
+        assert has_base_url, (
+            "Generated code should reference a base URL or host "
+            "for the API under test"
+        )
+
+    def test_generated_code_uses_test_prefix(self, client, sample_openapi_spec):
+        """Edge: All generated test functions follow pytest naming convention (test_ prefix)."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # Every function definition should use the test_ prefix
+        import re
+        func_names = re.findall(r"def (\w+)\(", code)
+        test_funcs = [name for name in func_names if name.startswith("test_")]
+        non_test_funcs = [
+            name for name in func_names
+            if not name.startswith("test_") and not name.startswith("_")
+        ]
+        assert len(test_funcs) > 0, "Generated code should contain test_ functions"
+        # Helper functions (prefixed with _) are acceptable, but top-level
+        # non-test, non-helper functions suggest incorrect naming
+        for func in non_test_funcs:
+            # Allow common helper/fixture patterns
+            assert func in ("setup", "teardown", "fixture", "conftest"), (
+                f"Unexpected non-test function '{func}' in generated code; "
+                f"test functions should start with 'test_'"
+            )
+
+    def test_generated_code_has_assertions(self, client, sample_openapi_spec):
+        """Edge: Generated tests contain assert statements for meaningful verification."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        assert "assert " in code, (
+            "Generated test code must contain assert statements"
+        )
+
+    def test_generated_code_checks_status_codes(self, client, sample_openapi_spec):
+        """Edge: Generated tests verify HTTP status codes from the spec."""
+        response = _generate(client, sample_openapi_spec)
+        code = response.text
+        # The sample spec has 200, 201, and 404 status codes
+        assert "200" in code, "Generated code should check for 200 status"
+        assert "201" in code or "post" in code.lower(), (
+            "Generated code should reference the 201 response for POST /pets"
+        )

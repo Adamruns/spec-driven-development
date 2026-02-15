@@ -2,21 +2,17 @@
 
 ## Completed
 
-- [x] Test Case Manager API (see SPECS/test-case-manager-api.md)
-  - [x] AC1: POST /test-cases creates a test case and returns 201
-  - [x] AC2: GET /test-cases returns all test cases as a list with 200
-  - [x] AC3: GET /test-cases?status=active filters by status
-  - [x] AC4: GET /test-cases?priority=high filters by priority
-  - [x] AC5: GET /test-cases?tag=regression filters by tag
-  - [x] AC6: GET /test-cases/{id} returns a single test case with 200
-  - [x] AC7: GET /test-cases/{id} returns 404 for non-existent ID
-  - [x] AC8: PUT /test-cases/{id} updates the test case and returns 200
-  - [x] AC9: PUT /test-cases/{id} returns 404 for non-existent ID
-  - [x] AC10: DELETE /test-cases/{id} deletes the test case and returns 200
-  - [x] AC11: DELETE /test-cases/{id} returns 404 for non-existent ID
-  - [x] AC12: POST /test-cases with invalid data returns 422
-  - [x] AC13: Swagger UI is accessible at /docs
-  - [x] AC14: Data persists across server restarts (SQLite)
+- [x] Spec-to-Test Generator API (see SPECS/spec-to-test-generator.md)
+  - [x] AC1: POST /generate returns 200 with generated pytest code
+  - [x] AC2: Generated tests include happy-path tests for each endpoint
+  - [x] AC3: Generated tests include jsonschema response validation
+  - [x] AC4: Generated tests include 404 tests for path-parameter endpoints
+  - [x] AC5: Generated tests include 422 tests for required request body fields
+  - [x] AC6: Invalid/non-OpenAPI JSON returns 400
+  - [x] AC7: Missing or empty body returns 422
+  - [x] AC8: GET /health returns 200
+  - [x] AC9: Generated code is syntactically valid Python
+  - [x] AC10: Swagger UI accessible at /docs
 
 ## Refactor Proposals
 

@@ -1,7 +1,4 @@
-"""Entry point for the Test Case Manager API."""
-
 import uvicorn
-
 from app.main import app
 
 if __name__ == "__main__":

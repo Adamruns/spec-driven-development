@@ -1,49 +1,158 @@
-"""Shared fixtures for tests."""
-
-import os
-import tempfile
+"""Shared fixtures for Spec-to-Test Generator API tests."""
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db
 from app.main import app
-
-
-@pytest.fixture(autouse=True)
-def temp_database(tmp_path):
-    """Use a temporary database file for each test to ensure isolation."""
-    db_file = str(tmp_path / "test.db")
-    os.environ["APP_DB_PATH"] = db_file
-    db.DB_PATH = db_file
-    db.init_db()
-    yield db_file
-    # Cleanup is handled by tmp_path fixture
 
 
 @pytest.fixture
 def client():
-    """Provide a FastAPI TestClient."""
+    """Provide a FastAPI TestClient for the application."""
     return TestClient(app)
 
 
 @pytest.fixture
-def sample_test_case():
-    """Return a sample test case payload for creating test cases."""
+def sample_openapi_spec():
+    """A minimal but valid OpenAPI 3.x spec for testing.
+
+    Includes multiple endpoints, path parameters, request bodies,
+    response schemas, and various HTTP methods to exercise all
+    generation paths.
+    """
     return {
-        "title": "Login with valid credentials",
-        "description": "Verify that a user can log in with correct username and password",
-        "steps": "1. Navigate to /login\n2. Enter valid username\n3. Enter valid password\n4. Click Submit",
-        "expected_result": "User is redirected to the dashboard",
-        "priority": "high",
-        "status": "active",
-        "tags": ["smoke", "regression"],
+        "openapi": "3.0.0",
+        "info": {"title": "Pet Store", "version": "1.0.0"},
+        "paths": {
+            "/pets": {
+                "get": {
+                    "summary": "List pets",
+                    "responses": {
+                        "200": {
+                            "description": "A list of pets",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "integer"},
+                                                "name": {"type": "string"},
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        }
+                    },
+                },
+                "post": {
+                    "summary": "Create a pet",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["name"],
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "tag": {"type": "string"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "201": {"description": "Pet created"}
+                    },
+                },
+            },
+            "/pets/{petId}": {
+                "get": {
+                    "summary": "Get a pet",
+                    "parameters": [
+                        {
+                            "name": "petId",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "A pet",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "integer"},
+                                            "name": {"type": "string"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "404": {"description": "Pet not found"},
+                    },
+                }
+            },
+        },
     }
 
 
 @pytest.fixture
-def created_test_case(client, sample_test_case):
-    """Create a test case and return the response data."""
-    response = client.post("/test-cases", json=sample_test_case)
-    assert response.status_code == 201
-    return response.json()
+def minimal_openapi_spec():
+    """The smallest valid OpenAPI spec: required keys present but paths is empty."""
+    return {
+        "openapi": "3.0.0",
+        "info": {"title": "Empty API", "version": "0.1.0"},
+        "paths": {},
+    }
+
+
+@pytest.fixture
+def multi_method_spec():
+    """An OpenAPI spec with multiple HTTP methods on a single path."""
+    return {
+        "openapi": "3.0.0",
+        "info": {"title": "Multi-Method API", "version": "1.0.0"},
+        "paths": {
+            "/items": {
+                "get": {
+                    "summary": "List items",
+                    "responses": {
+                        "200": {"description": "A list of items"}
+                    },
+                },
+                "post": {
+                    "summary": "Create an item",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["name"],
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "201": {"description": "Item created"}
+                    },
+                },
+                "delete": {
+                    "summary": "Delete all items",
+                    "responses": {
+                        "204": {"description": "All items deleted"}
+                    },
+                },
+            }
+        },
+    }
