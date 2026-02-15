@@ -5,6 +5,6 @@ pydantic
 pytest
 httpx
 
-# Dependencies of the generated test code (not needed by this app itself):
-# requests
-# jsonschema
+# Also used by the smoke test that runs pytest --collect-only on generated code
+requests
+jsonschema
