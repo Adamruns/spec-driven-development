@@ -70,6 +70,28 @@ async def generate_tests(request: Request) -> PlainTextResponse:
             },
         )
 
+    # Validate OpenAPI version (must be 3.x)
+    openapi_version = str(body.get("openapi", ""))
+    if not openapi_version.startswith("3."):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": (
+                    f"Unsupported OpenAPI version '{openapi_version}'. "
+                    f"Only OpenAPI 3.x specs are supported."
+                )
+            },
+        )
+
+    # Validate that paths is a JSON object
+    if not isinstance(body.get("paths"), dict):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "'paths' must be a JSON object mapping paths to path items."
+            },
+        )
+
     # Generate the test code
     code = generate_test_code(body)
 

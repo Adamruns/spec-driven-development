@@ -257,6 +257,32 @@ class TestGenerateErrors:
         )
         assert response.status_code == 422
 
+    def test_openapi_2_spec_returns_400(self, client):
+        """AC6: An OpenAPI 2.0 (Swagger) spec is rejected with 400."""
+        response = client.post(
+            "/generate",
+            json={
+                "openapi": "2.0",
+                "info": {"title": "Old spec", "version": "1.0.0"},
+                "paths": {},
+            },
+        )
+        assert response.status_code == 400
+        assert "3.x" in response.json()["detail"] or "version" in response.json()["detail"].lower()
+
+    def test_paths_as_list_returns_400(self, client):
+        """AC6: A spec where 'paths' is a list instead of an object returns 400."""
+        response = client.post(
+            "/generate",
+            json={
+                "openapi": "3.0.0",
+                "info": {"title": "Bad paths", "version": "1.0.0"},
+                "paths": ["/foo", "/bar"],
+            },
+        )
+        assert response.status_code == 400
+        assert "paths" in response.json()["detail"].lower()
+
 
 # ---------------------------------------------------------------------------
 # AC8: GET /health returns 200 with status "ok"

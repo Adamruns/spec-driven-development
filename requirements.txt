@@ -1,5 +1,10 @@
+# Application and test dependencies
 fastapi
 uvicorn
 pydantic
 pytest
 httpx
+
+# Dependencies of the generated test code (not needed by this app itself):
+# requests
+# jsonschema

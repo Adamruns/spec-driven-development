@@ -14,6 +14,14 @@
   - [x] AC9: Generated code is syntactically valid Python
   - [x] AC10: Swagger UI accessible at /docs
 
+- [x] Input Validation and Error Handling (see SPECS/input-validation-and-error-handling.md)
+  - [x] AC1: OpenAPI 2.0 spec rejected with 400
+  - [x] AC2: Non-object `paths` rejected with 400
+  - [x] AC3: Missing required keys rejected with 400
+  - [x] AC4: Non-JSON body returns 422
+  - [x] AC5: Empty body returns 422
+  - [x] AC6: All errors include descriptive `detail` field
+
 ## Refactor Proposals
 
 -

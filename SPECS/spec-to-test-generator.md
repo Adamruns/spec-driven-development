@@ -23,8 +23,8 @@ Provide a REST API that accepts an OpenAPI 3.x specification and generates a run
 - [x] AC2: Generated tests include a happy-path test for each endpoint+method in the spec
 - [x] AC3: Generated tests include jsonschema validation for endpoints with defined response schemas
 - [x] AC4: Generated tests include 404 tests for endpoints with path parameters
-- [x] AC5: Generated tests include 422 tests for endpoints with required request body fields
-- [x] AC6: POST /generate with invalid/non-OpenAPI JSON returns 400 with a descriptive error message
+- [x] AC5: Generated tests include 422 tests for endpoints with explicitly required request bodies
+- [x] AC6: POST /generate with invalid/non-OpenAPI JSON returns 400 with a descriptive error message (see also SPECS/input-validation-and-error-handling.md)
 - [x] AC7: POST /generate with missing or empty body returns 422
 - [x] AC8: GET /health returns 200 with status "ok"
 - [x] AC9: Generated test code is syntactically valid Python (compiles without errors)

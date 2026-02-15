@@ -85,14 +85,17 @@ def _contains_ref(obj: Any) -> bool:
 
 
 def _has_required_request_body(operation: dict[str, Any]) -> bool:
-    """Check if an operation has a required request body."""
+    """Check if an operation has a required request body.
+
+    Per the OpenAPI 3.x spec, ``requestBody.required`` defaults to ``False``.
+    We only generate missing-body tests when the body is explicitly required.
+    """
     request_body = operation.get("requestBody", {})
     if not request_body:
         return False
-    # If the request body is marked as required (default is False per spec,
-    # but many specs set it True or just include it implying it's needed).
-    # We treat presence of requestBody with content as having a body.
-    return bool(request_body.get("content"))
+    if not request_body.get("content"):
+        return False
+    return bool(request_body.get("required", False))
 
 
 def _get_request_body_schema(operation: dict[str, Any]) -> dict | None:
