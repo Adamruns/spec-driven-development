@@ -14,6 +14,10 @@ AC9:  Generated test code is syntactically valid Python (compiles without errors
 AC10: Swagger UI is accessible at /docs
 """
 
+import os
+import subprocess
+import tempfile
+
 import pytest
 
 
@@ -451,3 +455,140 @@ class TestGenerateEdgeCases:
         assert "201" in code or "post" in code.lower(), (
             "Generated code should reference the 201 response for POST /pets"
         )
+
+
+# ---------------------------------------------------------------------------
+# Smoke test: generated code is structurally correct as a pytest suite
+# ---------------------------------------------------------------------------
+
+class TestGenerateSmoke:
+    """Smoke test that validates generated code is a structurally correct pytest suite.
+
+    Rather than only checking syntax (compile), this test writes the generated
+    code to a temporary file and runs ``pytest --collect-only`` on it.  If
+    collection succeeds and discovers test functions, the generated code is
+    not just syntactically valid but structurally recognizable by pytest.
+    """
+
+    def test_generated_code_collects_as_pytest_suite(self, client):
+        """Generated code from a comprehensive spec is collected by pytest without errors."""
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Comprehensive API", "version": "1.0.0"},
+            "paths": {
+                "/users": {
+                    "get": {
+                        "summary": "List users",
+                        "responses": {
+                            "200": {
+                                "description": "A list of users",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "id": {"type": "integer"},
+                                                    "email": {"type": "string"},
+                                                },
+                                            },
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    },
+                    "post": {
+                        "summary": "Create user",
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["email"],
+                                        "properties": {
+                                            "email": {"type": "string"},
+                                            "name": {"type": "string"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "201": {"description": "User created"}
+                        },
+                    },
+                },
+                "/users/{userId}": {
+                    "get": {
+                        "summary": "Get user by ID",
+                        "parameters": [
+                            {
+                                "name": "userId",
+                                "in": "path",
+                                "required": True,
+                                "schema": {"type": "integer"},
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "A user",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "integer"},
+                                                "email": {"type": "string"},
+                                            },
+                                        }
+                                    }
+                                },
+                            },
+                            "404": {"description": "User not found"},
+                        },
+                    },
+                    "delete": {
+                        "summary": "Delete user",
+                        "responses": {
+                            "204": {"description": "User deleted"},
+                            "404": {"description": "User not found"},
+                        },
+                    },
+                },
+            },
+        }
+
+        response = _generate(client, spec)
+        assert response.status_code == 200
+        code = response.text
+
+        # Write to a temp file and run pytest --collect-only
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".py", prefix="test_generated_")
+        try:
+            with os.fdopen(tmp_fd, "w") as f:
+                f.write(code)
+
+            result = subprocess.run(
+                ["python", "-m", "pytest", "--collect-only", "-q", tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            assert result.returncode == 0, (
+                f"pytest --collect-only failed (rc={result.returncode}).\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}\n"
+                f"--- Generated code ---\n{code}"
+            )
+
+            # Verify that test functions were actually discovered
+            assert "test_" in result.stdout, (
+                f"pytest collected no test functions.\n"
+                f"stdout:\n{result.stdout}"
+            )
+        finally:
+            os.unlink(tmp_path)
